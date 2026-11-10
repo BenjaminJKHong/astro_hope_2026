@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h2>AstroPulse Telemetry Test</h2>
+    <pre id="output"></pre>
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws/telemetry");
+        const output = document.getElementById("output");
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            output.innerHTML = JSON.stringify(data, null, 2) + "\n\n" + output.innerHTML;
+        };
+    </script>
+</body>
+</html>
