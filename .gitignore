@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+backend/5_LOFT.csv
+
+backend/5_CA.csv
+
+backend/5_DA.csv
