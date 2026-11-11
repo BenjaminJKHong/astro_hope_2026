@@ -90,7 +90,7 @@ export default function Home() {
                                     <p className="text-gray-500 mb-2">AGENT: {aiLog.agent}</p>
                                     <p className="mb-2">
                                         <span className="text-gray-500">TRIAGE LEVEL: </span> 
-                                        <span className={`font-bold ${aiLog.triage_level === 'RED' ? 'text-red-500' : aiLog.triage_level === 'YELLOW' ? 'text-yellow-500' : 'text-green-500'}`}>
+                                        <span className={`font-bold ${aiLog.triage_level === 'RED' ? 'text-red-500' : (aiLog.triage_level === 'AMBER' || aiLog.triage_level === 'YELLOW') ? 'text-amber-500' : 'text-green-500'}`}>
                                             [{aiLog.triage_level}]
                                         </span>
                                     </p>
