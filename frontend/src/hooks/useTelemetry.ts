@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
+import type { TelemetryMessage } from '@/types/telemetry';
 
 export function useTelemetry() {
-    const [telemetry, setTelemetry] = useState<any>(null);
-    const [history, setHistory] = useState<any[]>([]);
+    const [telemetry, setTelemetry] = useState<TelemetryMessage | null>(null);
+    const [history, setHistory] = useState<TelemetryMessage[]>([]);
     const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
@@ -30,7 +31,15 @@ export function useTelemetry() {
             };
             
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+                let data: TelemetryMessage;
+                try {
+                    const parsed: unknown = JSON.parse(event.data);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+                    data = parsed as TelemetryMessage;
+                } catch {
+                    // Ignore malformed frames and keep the last valid telemetry visible.
+                    return;
+                }
                 setTelemetry(data);
                 
                 setHistory(prev => {

@@ -13,18 +13,12 @@ import { RadiationWidget } from "./RadiationWidget";
 import { AlertsPanel } from "./AlertsPanel";
 import { AnalysisPreview } from "./AnalysisPreview";
 import { CrewStreams } from "./CrewStreams";
+import type { TelemetryMessage } from "@/types/telemetry";
 
 // Define the incoming WebSocket props
 interface MissionOverviewProps {
-  telemetry?: {
-    timestamp?: string;
-    heart_rate?: number;
-    spo2?: number;
-    system_status?: string;
-    active_alerts?: string[];
-    ai_surgeon_log?: string;
-  } | null;
-  history?: any[];
+  telemetry?: TelemetryMessage | null;
+  history?: TelemetryMessage[];
   isConnected?: boolean;
 }
 
@@ -124,9 +118,7 @@ export function MissionOverview({
     </div>
     <div className="overview-info-grid">
       <AlertsPanel critical={critical} />
-      {/* Pass live telemetry to the AI Flight Surgeon Preview card */}
-      {/* @ts-ignore */}
-      <AnalysisPreview telemetry={telemetry} />
+      <AnalysisPreview telemetry={telemetry} isConnected={isConnected} />
     </div>
     <CrewStreams />
   </>;
