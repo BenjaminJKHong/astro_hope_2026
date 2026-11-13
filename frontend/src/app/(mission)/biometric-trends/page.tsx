@@ -1,7 +1,10 @@
-import { Suspense } from "react";
-import { BiometricTrends } from "@/components/dashboard/BiometricTrends";
-import BiometricTrendsLoading from "./loading";
+import { CrewBiometricProfile } from "@/components/crew-profile/CrewBiometricProfile";
+import { WarningStateProvider } from "@/components/warnings/WarningStateProvider";
 
 export default function BiometricTrendsPage() {
-  return <Suspense fallback={<BiometricTrendsLoading />}><BiometricTrends /></Suspense>;
+  return (
+    <WarningStateProvider>
+      <CrewBiometricProfile />
+    </WarningStateProvider>
+  );
 }

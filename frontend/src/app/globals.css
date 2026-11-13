@@ -414,3 +414,60 @@ body {
     overflow-x: auto;
   }
 }
+
+.analysis-preview-heading,
+.analysis-log-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-preview-heading h2 {
+  margin: 0;
+}
+
+.analysis-source,
+.analysis-sync-stamp {
+  color: var(--text-subtle);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.analysis-log {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.analysis-log-meta > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.triage-badge {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.triage-green { color: var(--status-green); }
+.triage-amber { color: var(--status-amber); }
+.triage-red { color: #ff6674; }
+.triage-unknown { color: var(--text-muted); }
+
+.analysis-diagnosis {
+  margin: 0;
+  color: var(--foreground);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.analysis-sync-stamp {
+  justify-self: end;
+  margin-top: 4px;
+}
