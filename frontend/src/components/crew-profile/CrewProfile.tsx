@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useTelemetry } from "@/hooks/useTelemetry";
 import { useCrewRoster, type CrewLocation } from "@/hooks/useCrewRoster";
@@ -23,7 +23,7 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
   const [baselineHr, setBaselineHr] = useState("76");
   const [baselineSpo2, setBaselineSpo2] = useState("98");
 
-  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleRegister: React.FormEventHandler<HTMLFormElement> = (e) => {
     e.preventDefault();
     if (!name.trim() || !callsign.trim()) return;
 
@@ -64,12 +64,10 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
             <label htmlFor="input-name" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-3">FULL NAME</label>
             <input id="input-name" type="text" required placeholder="e.g. Capt. Sarah Jenkins" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-5 py-3 rounded-full bg-slate-900/80 border border-white/15 text-sm text-white placeholder:text-blue-200/30 focus:outline-none focus:border-blue-400" />
           </div>
-
           <div>
             <label htmlFor="input-callsign" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-3">CALLSIGN / ID</label>
             <input id="input-callsign" type="text" required placeholder="e.g. 04-E" value={callsign} onChange={(e) => setCallsign(e.target.value)} className="w-full px-5 py-3 rounded-full bg-slate-900/80 border border-white/15 text-sm text-white placeholder:text-blue-200/30 focus:outline-none focus:border-blue-400" />
           </div>
-
           <div>
             <label htmlFor="input-role" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-3">STATION ROLE</label>
             <input id="input-role" type="text" placeholder="e.g. Flight Engineer" value={role} onChange={(e) => setRole(e.target.value)} className="w-full px-5 py-3 rounded-full bg-slate-900/80 border border-white/15 text-sm text-white placeholder:text-blue-200/30 focus:outline-none focus:border-blue-400" />
@@ -81,7 +79,6 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
             <label htmlFor="input-task" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-3">CURRENT TASK / MISSION NOTE</label>
             <input id="input-task" type="text" placeholder="e.g. Fixing radiator valve in external sector 4" value={currentTask} onChange={(e) => setCurrentTask(e.target.value)} className="w-full px-5 py-3 rounded-full bg-slate-900/80 border border-white/15 text-sm text-white placeholder:text-blue-200/30 focus:outline-none focus:border-blue-400" />
           </div>
-
           <div>
             <label htmlFor="input-location" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-3">STATION LOCATION / ZONE</label>
             <select id="input-location" value={location} onChange={(e) => setLocation(e.target.value as CrewLocation)} className="w-full px-5 py-3 rounded-full bg-slate-900/80 border border-white/15 text-sm text-white focus:outline-none focus:border-blue-400">
@@ -90,7 +87,6 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
               ))}
             </select>
           </div>
-
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor="input-hr" className="block text-xs text-blue-200/60 font-semibold mb-1.5 ml-2">BASE HR</label>
@@ -110,7 +106,6 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
         </div>
       </form>
 
-      {/* ACTIVE CREW CATEGORIZED BY ZONE */}
       <div className="space-y-6">
         <h2 className="text-lg font-bold text-blue-100 tracking-wide uppercase">Active Station Personnel</h2>
         
@@ -129,10 +124,9 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
                   </span>
                 </div>
 
-                {/* TASK NOTE FOR THE CAPTAIN */}
                 <div className="bg-slate-900/60 border border-white/5 rounded-xl p-3 my-3">
                   <span className="text-[10px] uppercase font-bold text-blue-300/60 block mb-1">Active Assignment</span>
-                  <p className="text-xs text-blue-100 italic">"{member.currentTask}"</p>
+                  <p className="text-xs text-blue-100 italic">&quot;{member.currentTask}&quot;</p>
                 </div>
               </div>
 
@@ -154,16 +148,28 @@ export function CrewProfile(_props: Readonly<{ crew?: unknown }>) {
                   </div>
                 </div>
 
-                <button onClick={() => toggleOffboard(member.id)} className="w-full py-2 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-xs font-bold tracking-wider transition-all">
-                  MARK OFFBOARD / RETIRED
-                </button>
+                <div className="flex flex-col gap-2">
+                  <Link
+                    href={`/biometric-trends?crew=${member.id}`}
+                    className={`w-full py-2 rounded-full text-center text-xs font-bold tracking-wider transition-all border ${
+                      member.isCritical
+                        ? "bg-red-500/25 hover:bg-red-500/35 text-red-100 border-red-400/50"
+                        : "bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border-cyan-400/30"
+                    }`}
+                  >
+                    {member.isCritical ? "DIAGNOSE CRITICAL FAULT →" : "OPEN BIOMETRIC & SUIT SCAN →"}
+                  </Link>
+
+                  <button onClick={() => toggleOffboard(member.id)} className="w-full py-2 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-xs font-bold tracking-wider transition-all">
+                    MARK OFFBOARD / RETIRED
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* OFFBOARDED / RETIRED CREW SECTION */}
       {offboardedCrew.length > 0 && (
         <div className="space-y-4 pt-6 border-t border-white/10">
           <h2 className="text-sm font-bold text-gray-400 tracking-wider uppercase">Offboarded / Retired Personnel ({offboardedCrew.length})</h2>

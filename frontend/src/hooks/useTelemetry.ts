@@ -26,7 +26,7 @@ export function useTelemetry() {
             };
             
             ws.onerror = (error) => {
-                console.error('WebSocket Error. Is Uvicorn running on port 8000?', error);
+                console.warn('WebSocket reconnecting... (Awaiting Uvicorn on port 8000)');
                 ws.close(); // Force close to trigger the auto-reconnect
             };
             

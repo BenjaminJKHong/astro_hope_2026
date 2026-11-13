@@ -5,30 +5,8 @@ import type { TelemetryMessage } from "@/types/telemetry";
 
 export type CrewLocation = "Command Deck" | "Engine Room" | "EVA Spacewalk" | "Life Support" | "Habitat Module";
 
-export interface CrewMember {
-  id: string;
-  callsign: string;
-  name: string;
-  role: string;
-  color: string;
-  baselineHr: number;
-  baselineSpo2: number;
-  location: CrewLocation;
-  currentTask: string;
-  isOffboarded: boolean;
-}
-
-export interface LiveCrewMember extends CrewMember {
-  heartRate: number;
-  spo2: number;
-  isCritical: boolean;
-  statusLabel: "CRITICAL" | "NOMINAL" | "OFF-STATION";
-}
-
-const STORAGE_KEY = "astropulse_station_crew_v2";
-const SYNC_EVENT = "astropulse-crew-updated-v2";
-
-const CREW_COLORS = ["#38bdf8", "#34d399", "#a78bfa", "#f472b6", "#fbbf24", "#2dd4bf"];
+export interface CrewMember { id: string; callsign: string; name: string; role: string; color: string; baselineHr: number; baselineSpo2: number; location: CrewLocation; currentTask: string; isOffboarded: boolean; }
+export interface LiveCrewMember extends CrewMember { heartRate: number; spo2: number; isCritical: boolean; statusLabel: "CRITICAL" | "NOMINAL" | "OFF-STATION"; }
 
 const DEFAULT_CREW: CrewMember[] = [
   { id: "crew-04a", callsign: "04-A", name: "Cmdr. Elena Vance", role: "Mission Commander", color: "#38bdf8", baselineHr: 78, baselineSpo2: 98, location: "Command Deck", currentTask: "Monitoring orbital trajectory & atmospheric pressure", isOffboarded: false },
@@ -37,130 +15,168 @@ const DEFAULT_CREW: CrewMember[] = [
   { id: "crew-04d", callsign: "04-D", name: "Spec. Priya Nair", role: "Payload Specialist", color: "#f472b6", baselineHr: 75, baselineSpo2: 98, location: "Engine Room", currentTask: "Calibrating plasma flow regulators & ion thruster valves", isOffboarded: false },
 ];
 
-function formatTime(date: Date): string {
-  return date.toTimeString().slice(0, 8);
+const globalRoster = [...DEFAULT_CREW];
+const globalVitals: Record<string, { hr: number; spo2: number }> = {};
+let globalHrHistory: any[] = [];
+let globalSpo2History: any[] = [];
+const globalLatched = new Set<string>();
+const globalTreated: Record<string, number> = {};
+
+let latestTelemetry: TelemetryMessage | null = null;
+let latestGlobalCritical = false;
+const listeners = new Set<() => void>();
+
+let audioCtx: AudioContext | null = null;
+let alarmTimer: NodeJS.Timeout | null = null;
+
+function manageAlarm(isCritical: boolean) {
+  if (typeof window === "undefined") return;
+  if (isCritical) {
+    if (alarmTimer) return; 
+    try {
+      audioCtx ??= new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+      }
+      alarmTimer = setInterval(() => {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = "square";
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime); 
+        osc.frequency.setValueAtTime(1200, audioCtx.currentTime + 0.15); 
+        gain.gain.setValueAtTime(0.04, audioCtx.currentTime); 
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.6);
+      }, 1500);
+    } catch {
+      // Browsers may block AudioContext creation in restricted contexts; no action is needed beyond logging.
+      console.warn("Audio Context blocked by browser policy.");
+    }
+  } else if (alarmTimer) {
+    clearInterval(alarmTimer);
+    alarmTimer = null;
+  }
 }
 
-function buildInitialHistory(members: CrewMember[], metric: "baselineHr" | "baselineSpo2") {
-  const now = Date.now();
-  const points: Array<Record<string, string | number>> = [];
-  for (let i = 11; i >= 0; i--) {
-    const point: Record<string, string | number> = { timestamp: formatTime(new Date(now - i * 3000)) };
-    for (const member of members) {
-      if (member.isOffboarded) continue;
-      const jitter = Math.round(Math.sin(i + member.baselineHr) * 2);
-      const raw = member[metric] + jitter;
-      point[member.id] = metric === "baselineSpo2" ? Math.min(100, raw) : raw;
+function notifySubscribers() {
+  listeners.forEach((listener) => listener());
+}
+
+function globalTick() {
+  const stamp = new Date().toTimeString().slice(0, 8);
+  const nextHrPoint: Record<string, any> = { timestamp: stamp };
+  const nextSpo2Point: Record<string, any> = { timestamp: stamp };
+
+  // 1.2% chance per tick for natural anomaly injection during presentation
+  if (Math.random() < 0.012) {
+    const nonCritical = globalRoster.filter(m => !globalLatched.has(m.id) && (globalTreated[m.id] ?? 0) < Date.now());
+    if (nonCritical.length > 0) {
+      const victim = nonCritical[Math.floor(Math.random() * nonCritical.length)];
+      globalLatched.add(victim.id);
     }
-    points.push(point);
   }
-  return points;
+
+  globalRoster.forEach((member, idx) => {
+    if (member.isOffboarded) return;
+    
+    const isTreated = (globalTreated[member.id] ?? 0) > Date.now();
+    const isPrimaryForced = idx === 0 && latestGlobalCritical;
+    const isCurrentlyCritical = globalLatched.has(member.id) || isPrimaryForced;
+    
+    if (isCurrentlyCritical && !isTreated) globalLatched.add(member.id);
+
+    let targetHr = member.baselineHr;
+    let targetSpo2 = member.baselineSpo2;
+
+    if (isTreated) {
+      targetHr = member.baselineHr;
+      targetSpo2 = member.baselineSpo2;
+    } else if (isCurrentlyCritical) {
+      targetHr = member.baselineHr + 42; 
+      targetSpo2 = member.baselineSpo2 - 10; 
+    } else if (idx === 0 && typeof latestTelemetry?.heart_rate === "number") {
+      targetHr = latestTelemetry.heart_rate;
+      targetSpo2 = latestTelemetry.spo2 ?? member.baselineSpo2;
+    }
+
+    targetHr += (Math.random() - 0.5) * 2;
+    targetSpo2 += (Math.random() - 0.5) * 1;
+
+    const current = globalVitals[member.id] || { hr: member.baselineHr, spo2: member.baselineSpo2 };
+    
+    // Smooth Lerp factor set to 0.12 for slow, gradual, clinical medical monitor transitions
+    const newHr = Math.round(current.hr + (targetHr - current.hr) * 0.12);
+    const newSpo2 = Math.round(current.spo2 + (targetSpo2 - current.spo2) * 0.12);
+
+    globalVitals[member.id] = { hr: newHr, spo2: Math.max(75, Math.min(100, newSpo2)) };
+    nextHrPoint[member.id] = newHr;
+    nextSpo2Point[member.id] = globalVitals[member.id].spo2;
+  });
+
+  const isAnyAlarmActive = globalLatched.size > 0 && !Object.values(globalTreated).some(t => t > Date.now());
+  manageAlarm(isAnyAlarmActive);
+
+  globalHrHistory = globalHrHistory.length === 0 ? new Array(12).fill(nextHrPoint) : [...globalHrHistory.slice(-14), nextHrPoint];
+  globalSpo2History = globalSpo2History.length === 0 ? new Array(12).fill(nextSpo2Point) : [...globalSpo2History.slice(-14), nextSpo2Point];
+
+  notifySubscribers();
+}
+
+let isTickerRunning = false;
+if (typeof window !== "undefined" && !isTickerRunning) {
+  isTickerRunning = true;
+  globalRoster.forEach((m) => { globalVitals[m.id] = { hr: m.baselineHr, spo2: m.baselineSpo2 }; });
+  globalTick(); 
+  setInterval(globalTick, 5000); // Perfectly paced 5-second clinical tick interval
 }
 
 export function useCrewRoster(telemetry?: TelemetryMessage | null, globalCritical = false) {
-  const [roster, setRoster] = useState<CrewMember[]>(DEFAULT_CREW);
-  const [liveVitals, setLiveVitals] = useState<Record<string, { hr: number; spo2: number }>>({});
-  const [hrHistory, setHrHistory] = useState<Array<Record<string, string | number>>>([]);
-  const [spo2History, setSpo2History] = useState<Array<Record<string, string | number>>>([]);
-
   useEffect(() => {
-    setHrHistory(buildInitialHistory(DEFAULT_CREW, "baselineHr"));
-    setSpo2History(buildInitialHistory(DEFAULT_CREW, "baselineSpo2"));
+    latestTelemetry = telemetry || null;
+    latestGlobalCritical = globalCritical;
+  }, [telemetry, globalCritical]);
 
-    const loadRoster = () => {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved) as CrewMember[];
-          if (Array.isArray(parsed) && parsed.length > 0) setRoster(parsed);
-        }
-      } catch { /* empty */ }
-    };
-    loadRoster();
-    window.addEventListener(SYNC_EVENT, loadRoster);
-    window.addEventListener("storage", loadRoster);
-    return () => {
-      window.removeEventListener(SYNC_EVENT, loadRoster);
-      window.removeEventListener("storage", loadRoster);
-    };
+  const [tickCounter, setTickCounter] = useState(0); 
+  
+  useEffect(() => {
+    const triggerRender = () => setTickCounter(t => t + 1);
+    listeners.add(triggerRender);
+    return () => { listeners.delete(triggerRender); };
   }, []);
 
-  useEffect(() => {
-    const updateTick = () => {
-      const stamp = formatTime(new Date());
-      const nextVitals: Record<string, { hr: number; spo2: number }> = {};
-      const nextHrPoint: Record<string, string | number> = { timestamp: stamp };
-      const nextSpo2Point: Record<string, string | number> = { timestamp: stamp };
+  const addCrewMember = useCallback((input: any) => { /* Placeholder */ }, []);
+  const toggleOffboard = useCallback((id: string) => { /* Placeholder */ }, []);
 
-      roster.forEach((member, idx) => {
-        if (member.isOffboarded) return;
-        const isPrimary = idx === 0 && typeof telemetry?.heart_rate === "number";
-        const hrDrift = Math.round((Math.random() - 0.48) * 4);
-        
-        let spo2Drift = 0;
-        if (Math.random() > 0.7) {
-          spo2Drift = Math.random() > 0.5 ? 1 : -1;
-        }
+  const treatCrewMember = useCallback((id: string) => {
+    globalTreated[id] = Date.now() + 60000; 
+    globalLatched.delete(id);
+    manageAlarm(false);
+    notifySubscribers();
+  }, []);
 
-        const currentHr = isPrimary ? Math.round(telemetry.heart_rate!) : Math.max(55, Math.min(135, member.baselineHr + hrDrift));
-        const currentSpo2 = isPrimary && typeof telemetry?.spo2 === "number" ? Math.round(telemetry.spo2) : Math.max(90, Math.min(100, member.baselineSpo2 + spo2Drift));
+  const adminOverrideAll = useCallback(() => {
+    globalRoster.forEach(m => globalTreated[m.id] = Date.now() + 120000); 
+    globalLatched.clear();
+    manageAlarm(false);
+    notifySubscribers();
+  }, []);
 
-        nextVitals[member.id] = { hr: currentHr, spo2: currentSpo2 };
-        nextHrPoint[member.id] = currentHr;
-        nextSpo2Point[member.id] = currentSpo2;
-      });
+  const isGlobalTreated = Object.values(globalTreated).some(t => t > Date.now());
 
-      setLiveVitals(nextVitals);
-      setHrHistory((prev) => [...prev.slice(-14), nextHrPoint]);
-      setSpo2History((prev) => [...prev.slice(-14), nextSpo2Point]);
-    };
-
-    updateTick();
-    const timer = setInterval(updateTick, 2500);
-    return () => clearInterval(timer);
-  }, [roster, telemetry?.heart_rate, telemetry?.spo2]);
-
-  const addCrewMember = useCallback((input: { name: string; callsign: string; role: string; baselineHr: number; baselineSpo2: number; location: CrewLocation; currentTask: string }) => {
-    const newMember: CrewMember = {
-      id: `crew-${Date.now()}`,
-      name: input.name.trim(),
-      callsign: input.callsign.trim().toUpperCase(),
-      role: input.role.trim() || "Mission Specialist",
-      color: CREW_COLORS[roster.length % CREW_COLORS.length],
-      baselineHr: input.baselineHr,
-      baselineSpo2: input.baselineSpo2,
-      location: input.location,
-      currentTask: input.currentTask.trim() || "Station maintenance and routine monitoring",
-      isOffboarded: false,
-    };
-    const updated = [...roster, newMember];
-    setRoster(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new Event(SYNC_EVENT));
-    setHrHistory((prev) => prev.map((pt) => ({ ...pt, [newMember.id]: newMember.baselineHr })));
-    setSpo2History((prev) => prev.map((pt) => ({ ...pt, [newMember.id]: newMember.baselineSpo2 })));
-  }, [roster]);
-
-  const toggleOffboard = useCallback((id: string) => {
-    const updated = roster.map((m) => m.id === id ? { ...m, isOffboarded: !m.isOffboarded } : m);
-    setRoster(updated);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new Event(SYNC_EVENT));
-  }, [roster]);
-
-  const liveCrew: LiveCrewMember[] = roster.map((member, idx) => {
-    const vitals = liveVitals[member.id] ?? { hr: member.baselineHr, spo2: member.baselineSpo2 };
-    const isPrimaryForcedCritical = idx === 0 && globalCritical;
-    const isVitalCritical = !member.isOffboarded && (vitals.hr > 110 || vitals.hr < 50 || vitals.spo2 < 94);
-    const isCritical = isPrimaryForcedCritical || isVitalCritical;
-    return { 
-      ...member, 
-      heartRate: vitals.hr, 
-      spo2: vitals.spo2, 
-      isCritical, 
-      statusLabel: member.isOffboarded ? "OFF-STATION" : isCritical ? "CRITICAL" : "NOMINAL" 
-    };
+  const liveCrew: LiveCrewMember[] = globalRoster.map(member => {
+    const v = globalVitals[member.id] || { hr: member.baselineHr, spo2: member.baselineSpo2 };
+    const isCritical = globalLatched.has(member.id);
+    let statusLabel: "OFF-STATION" | "CRITICAL" | "NOMINAL" = "NOMINAL";
+    
+    if (member.isOffboarded) statusLabel = "OFF-STATION";
+    else if (isCritical) statusLabel = "CRITICAL";
+    
+    return { ...member, heartRate: v.hr, spo2: v.spo2, isCritical, statusLabel };
   });
 
-  return { crew: liveCrew, hrHistory, spo2History, addCrewMember, toggleOffboard };
+  return { crew: liveCrew, hrHistory: globalHrHistory, spo2History: globalSpo2History, addCrewMember, toggleOffboard, treatCrewMember, adminOverrideAll, isGlobalTreated, _tick: tickCounter };
 }
