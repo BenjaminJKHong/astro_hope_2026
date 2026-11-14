@@ -1,4 +1,5 @@
 import { CrewProfile } from "@/components/crew-profile/CrewProfile";
+import { WarningStateProvider } from "@/components/warnings/WarningStateProvider";
 import { crewStreamPlaceholders, getCrewStream } from "@/data/crew-streams";
 
 export function generateStaticParams() {
@@ -11,5 +12,9 @@ export default async function SelectedCrewProfilePage({
   params: Promise<{ crewKey: string }>;
 }) {
   const { crewKey } = await params;
-  return <CrewProfile crew={getCrewStream(crewKey)} />;
+  return (
+    <WarningStateProvider>
+      <CrewProfile crew={crewKey}/>
+    </WarningStateProvider>
+  )
 }

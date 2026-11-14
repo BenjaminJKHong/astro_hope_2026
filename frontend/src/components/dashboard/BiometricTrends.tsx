@@ -7,14 +7,14 @@ import { Panel } from "@/components/ui/Panel";
 import { TelemetryChart } from "@/components/dashboard/TelemetryChart";
 import { crewStreamPlaceholders, getCrewStream } from "@/data/crew-streams";
 import { emptyTelemetrySeries, missionTelemetry } from "@/data/telemetry";
-import type { TelemetryPoint, TelemetrySourceState } from "@/types/telemetry";
+import type { TelemetryPoint } from "@/types/telemetry";
 
 const metrics = [
-  { key: "heartRate", label: "HEART RATE", unit: "BPM", color: "#32d6f5", data: missionTelemetry.heartRate },
-  { key: "spo2", label: "SpO₂", unit: "%", color: "#3b82f6", data: missionTelemetry.spo2 },
-  { key: "bloodPressure", label: "BLOOD PRESSURE", unit: "mmHg", color: "#f5b942", data: emptyTelemetrySeries },
-  { key: "radiation_msv", label: "RADIATION · radiation_msv", unit: "mSv", color: "#35d07f", data: emptyTelemetrySeries },
-] satisfies { key: string; label: string; unit: string; color: string; data: TelemetryPoint[] }[];
+  { key: "heartRate", label: "HEART RATE", unit: "BPM", data: missionTelemetry.heartRate },
+  { key: "spo2", label: "SpO₂", unit: "%", data: missionTelemetry.spo2 },
+  { key: "bloodPressure", label: "BLOOD PRESSURE", unit: "mmHg", data: emptyTelemetrySeries },
+  { key: "radiation_msv", label: "RADIATION · radiation_msv", unit: "mSv", data: emptyTelemetrySeries },
+] satisfies { key: string; label: string; unit: string; data: TelemetryPoint[] }[];
 
 const ranges = [
   { key: "1h", label: "LAST 1 HOUR" },
@@ -30,6 +30,12 @@ export function BiometricTrends({ initialCrewKey }: BiometricTrendsProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedCrew = initialCrewKey ? getCrewStream(initialCrewKey) : undefined;
+  const chartCrew: Parameters<typeof TelemetryChart>[0]["crew"] = (selectedCrew
+    ? [selectedCrew]
+    : crewStreamPlaceholders.flatMap(({ key }) => {
+        const crew = getCrewStream(key);
+        return crew ? [crew] : [];
+      })) as unknown as Parameters<typeof TelemetryChart>[0]["crew"];
   const metricKey = searchParams.get("metric") ?? "all";
   const rangeKey = searchParams.get("range") ?? "24h";
   const selectedMetrics = metricKey === "all" ? metrics : metrics.filter((metric) => metric.key === metricKey);
@@ -49,13 +55,6 @@ export function BiometricTrends({ initialCrewKey }: BiometricTrendsProps) {
     router.push(`${path}${query ? `?${query}` : ""}`, { scroll: false });
   }
 
-  const sourceState: TelemetrySourceState = selectedCrew
-    ? selectedCrew.dataState === "NOT CONNECTED"
-      ? "NOT CONNECTED"
-      : selectedCrew.dataState === "SIMULATED"
-        ? "SIMULATED"
-        : "UNKNOWN"
-    : missionTelemetry.sourceState;
   const statusBadge = selectedCrew
     ? selectedCrew.dataState === "SIMULATED"
       ? "SIMULATED · NO MEASUREMENTS"
@@ -108,12 +107,10 @@ export function BiometricTrends({ initialCrewKey }: BiometricTrendsProps) {
         {selectedMetrics.length > 0 ? selectedMetrics.map((metric) => (
           <TelemetryChart
             key={metric.key}
-            variant="trend"
             title={`${metric.label} TREND`}
+            crew={chartCrew as Parameters<typeof TelemetryChart>[0]["crew"]}
             unit={metric.unit}
             data={metric.data}
-            sourceState={sourceState}
-            color={metric.color}
           />
         )) : (
           <Panel className="detail-empty-state" role="status">

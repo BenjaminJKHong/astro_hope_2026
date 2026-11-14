@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { TelemetryMessage } from '@/types/telemetry';
+import ENV from '@/data/env';
 
 export function useTelemetry() {
     const [telemetry, setTelemetry] = useState<TelemetryMessage | null>(null);
@@ -11,8 +12,7 @@ export function useTelemetry() {
         let reconnectTimer: NodeJS.Timeout;
 
         const connect = () => {
-            // Changed from localhost to 127.0.0.1 to fix Windows IPv6 resolution blocking
-            ws = new WebSocket('ws://127.0.0.1:8000/ws/telemetry');
+            ws = new WebSocket(ENV.wsURL + '/telemetry');
 
             ws.onopen = () => {
                 setIsConnected(true);
