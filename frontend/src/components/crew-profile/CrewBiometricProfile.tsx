@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type SyntheticEvent } from "react";
 import Link from "next/link";
 import { useTelemetry } from "@/hooks/useTelemetry";
 import { useCrewRoster, type LiveCrewMember } from "@/hooks/useCrewRoster";
@@ -8,6 +8,24 @@ import { useWarningState } from "@/components/warnings/WarningStateProvider";
 
 type SensorLayer = "BIOMEDICAL" | "SUIT";
 type SensorNode = { id: string; code: string; label: string; x: number; y: number; nominalMetric: string; criticalMetric: string; nominalDiagnosis: string; criticalDiagnosis: string; recommendedAction: string; };
+type ProfileMetrics = { sys: number; dia: number; coreTemp: string; radiation: string; suitPsid: string; co2Mmhg: string; };
+type SelfCheckIn = { sleepHours: number; bloodGlucose: number; moodScore: number; notes: string; updatedAt: string; };
+
+const DEFAULT_CHECKIN: SelfCheckIn = {
+  sleepHours: 7.5,
+  bloodGlucose: 96,
+  moodScore: 4,
+  notes: "Completed resistive exercise routine; zero dizziness.",
+  updatedAt: "08:00 Z",
+};
+
+const MOOD_OPTIONS: Record<number, string> = {
+  5: "5 · Peak Alertness & Morale",
+  4: "4 · Focused & Steady",
+  3: "3 · Neutral / Routine",
+  2: "2 · Low Mood / Mild Fatigue",
+  1: "1 · High Stress / Exhausted",
+};
 
 const BIOMEDICAL_NODES: SensorNode[] = [
   { id: "bio-cranial", code: "BIO-01 · CRANIAL / VESTIBULAR", label: "Cerebral Oximetry & Neuro-Vestibular", x: 110, y: 36, nominalMetric: "rSO₂ 74% · ICP Nominal", criticalMetric: "rSO₂ 58% · Hypoxic Neuro-Stress", nominalDiagnosis: "Cerebral perfusion and microgravity vestibular adaptation within baseline parameters.", criticalDiagnosis: "Cerebral hypoxia risk secondary to arterial desaturation and elevated sympathetic load.", recommendedAction: "Administer 100% O₂ via suit purge valve and stabilize crew member in zero-G restraint." },
@@ -25,7 +43,7 @@ const SUIT_NODES: SensorNode[] = [
   { id: "suit-lcvg", code: "xEMU-05 · LCVG & LOWER TORSO", label: "Liquid Cooling Garment & Waist Bearing", x: 92, y: 196, nominalMetric: "Coolant Loop 14.2°C · 0.9 L/min", criticalMetric: "Coolant Flow Restriction · Seal Drag", nominalDiagnosis: "LCVG tubing circulation and brief/hip mobility bearings operating without friction.", criticalDiagnosis: "Reduced coolant flow rate in lower torso manifold causing localized thermal buildup.", recommendedAction: "Cycle LCVG pump valve to bypass mode and reduce lower-extremity translation speed." }
 ];
 
-function getProfileMetrics(member: LiveCrewMember, isCritical: boolean, radMsv: number | null) {
+function getProfileMetrics(member: LiveCrewMember, isCritical: boolean, radMsv: number | null): ProfileMetrics {
   const seed = member.callsign.split("").reduce((acc, ch) => acc + (ch.codePointAt(0) ?? 0), 0);
   const sys = isCritical ? 146 + (seed % 14) : 114 + (seed % 10);
   const dia = isCritical ? 92 + (seed % 8) : 72 + (seed % 8);
@@ -73,79 +91,238 @@ function HolographicMapVisuals({ sensorLayer, activeNodes, activeNode, memberCri
   );
 }
 
-function TelemetryMatrix({ selectedMember, metrics, memberCritical }: Readonly<{ selectedMember: LiveCrewMember, metrics: any, memberCritical: boolean }>) {
+function TelemetryMatrix({ selectedMember, metrics, memberCritical, checkIn }: Readonly<{ selectedMember: LiveCrewMember, metrics: ProfileMetrics, memberCritical: boolean, checkIn: SelfCheckIn }>) {
+  const glucoseWatch = checkIn.bloodGlucose < 70 || checkIn.bloodGlucose > 180;
+
   return (
     <div className="rounded-3xl bg-[#141b2d]/85 border border-white/10 p-6 shadow-xl">
       <h2 className="text-xs font-bold tracking-widest text-blue-200/70 uppercase mb-4">BIOMEDICAL &amp; xEMU TELEMETRY MATRIX</h2>
       <div className="space-y-3">
-        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-4 flex justify-between items-center">
-          <div>
-            <span className="text-xs font-bold text-white block">HEART RATE (ECG LEAD II)</span>
-            <span className="text-[11px] text-blue-200/50">BASELINE 60–100 BPM</span>
+        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-3.5">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-xs font-bold text-white block">HEART RATE (ECG LEAD II)</span>
+              <span className="text-[11px] text-blue-200/50">BASELINE 60–100 BPM</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-2xl font-extrabold ${memberCritical ? "text-red-400" : "text-white"}`}>
+                {selectedMember.heartRate} <span className="text-xs font-normal text-blue-200/50">BPM</span>
+              </span>
+              <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-red-500/25 text-red-200" : "bg-emerald-500/20 text-emerald-300"}`}>
+                {memberCritical ? "ELEVATED" : "NOMINAL"}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-2xl font-extrabold ${memberCritical ? "text-red-400" : "text-white"}`}>
-              {selectedMember.heartRate} <span className="text-xs font-normal text-blue-200/50">BPM</span>
-            </span>
-            <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-red-500/25 text-red-200" : "bg-emerald-500/20 text-emerald-300"}`}>
-              {memberCritical ? "ELEVATED" : "NOMINAL"}
-            </span>
-          </div>
+          <p className="text-[11px] text-blue-200/55 mt-1.5">Plain-language guide: Microgravity reduces heart workload; sudden spikes warn of EVA overexertion or dehydration.</p>
         </div>
-        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-4 flex justify-between items-center">
-          <div>
-            <span className="text-xs font-bold text-white block">ARTERIAL OXYGEN SATURATION (SpO₂)</span>
-            <span className="text-[11px] text-blue-200/50">TARGET ≥ 95% SpO₂</span>
+
+        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-3.5">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-xs font-bold text-white block">ARTERIAL OXYGEN SATURATION (SpO₂)</span>
+              <span className="text-[11px] text-blue-200/50">TARGET ≥ 95% SpO₂</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-2xl font-extrabold ${memberCritical ? "text-red-400" : "text-white"}`}>
+                {selectedMember.spo2} <span className="text-xs font-normal text-blue-200/50">%</span>
+              </span>
+              <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-red-500/25 text-red-200" : "bg-emerald-500/20 text-emerald-300"}`}>
+                {memberCritical ? "HYPOXIA WATCH" : "NOMINAL"}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-2xl font-extrabold ${memberCritical ? "text-red-400" : "text-white"}`}>
-              {selectedMember.spo2} <span className="text-xs font-normal text-blue-200/50">%</span>
-            </span>
-            <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-red-500/25 text-red-200" : "bg-emerald-500/20 text-emerald-300"}`}>
-              {memberCritical ? "HYPOXIA WATCH" : "NOMINAL"}
-            </span>
-          </div>
+          <p className="text-[11px] text-blue-200/55 mt-1.5">Plain-language guide: Measures oxygen in blood; readings below 94% impair focus and require immediate O₂ purge.</p>
         </div>
-        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-4 flex justify-between items-center">
-          <div>
-            <span className="text-xs font-bold text-white block">BLOOD PRESSURE (CUFF / PPG)</span>
-            <span className="text-[11px] text-blue-200/50">SYSTOLIC / DIASTOLIC</span>
+
+        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-3.5">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-xs font-bold text-white block">BLOOD PRESSURE &amp; GLUCOSE</span>
+              <span className="text-[11px] text-blue-200/50">BP mmHg · GLUCOSE 70–140 mg/dL</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xl font-extrabold text-white">
+                {metrics.sys}/{metrics.dia} <span className="text-xs font-normal text-blue-200/50">mmHg</span> · {checkIn.bloodGlucose} <span className="text-xs font-normal text-blue-200/50">mg/dL</span>
+              </span>
+              <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${glucoseWatch ? "bg-amber-500/25 text-amber-200" : "bg-emerald-500/20 text-emerald-300"}`}>
+                {glucoseWatch ? "WATCH" : "NOMINAL"}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl font-extrabold text-white">
-              {metrics.sys}/{metrics.dia} <span className="text-xs font-normal text-blue-200/50">mmHg</span>
-            </span>
-            <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300">NOMINAL</span>
-          </div>
+          <p className="text-[11px] text-blue-200/55 mt-1.5">Plain-language guide: Tracks headward fluid shifts in zero-G and ensures steady energy during long EVA tasks.</p>
         </div>
-        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-4 flex justify-between items-center">
-          <div>
-            <span className="text-xs font-bold text-white block">xEMU SUIT PRESSURE &amp; pCO₂</span>
-            <span className="text-[11px] text-blue-200/50">NOMINAL EVA 4.3 PSID · pCO₂ &lt; 3.0 mmHg</span>
+
+        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-3.5">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-xs font-bold text-white block">xEMU SUIT PRESSURE &amp; pCO₂</span>
+              <span className="text-[11px] text-blue-200/50">NOMINAL EVA 4.3 PSID · pCO₂ &lt; 3.0 mmHg</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`text-xl font-extrabold ${memberCritical ? "text-amber-300" : "text-white"}`}>
+                {metrics.suitPsid} <span className="text-xs font-normal text-blue-200/50">psid</span> · {metrics.co2Mmhg} <span className="text-xs font-normal text-blue-200/50">mmHg</span>
+              </span>
+              <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-amber-500/25 text-amber-200" : "bg-emerald-500/20 text-emerald-300"}`}>
+                {memberCritical ? "DEGRADED" : "SEALED"}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-xl font-extrabold ${memberCritical ? "text-amber-300" : "text-white"}`}>
-              {metrics.suitPsid} <span className="text-xs font-normal text-blue-200/50">psid</span> · {metrics.co2Mmhg} <span className="text-xs font-normal text-blue-200/50">mmHg</span>
-            </span>
-            <span className={`px-3 py-1 rounded-full text-[10px] font-bold ${memberCritical ? "bg-amber-500/25 text-amber-200" : "bg-emerald-500/20 text-emerald-300"}`}>
-              {memberCritical ? "DEGRADED" : "SEALED"}
-            </span>
-          </div>
+          <p className="text-[11px] text-blue-200/55 mt-1.5">Plain-language guide: Closed suits trap exhaled CO₂; rising pCO₂ causes headaches and slows decision-making.</p>
         </div>
-        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-4 flex justify-between items-center">
-          <div>
-            <span className="text-xs font-bold text-white block">CORE TEMP &amp; DOSIMETER EXPOSURE</span>
-            <span className="text-[11px] text-blue-200/50">24H RADIATION LIMIT 0.50 mSv</span>
+
+        <div className="rounded-2xl bg-slate-900/60 border border-white/5 px-5 py-3.5">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-xs font-bold text-white block">CORE TEMP &amp; DOSIMETER EXPOSURE</span>
+              <span className="text-[11px] text-blue-200/50">24H RADIATION LIMIT 0.50 mSv</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xl font-extrabold text-white">
+                {metrics.coreTemp}°C · {metrics.radiation} <span className="text-xs font-normal text-blue-200/50">mSv</span>
+              </span>
+              <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300">WATCH</span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xl font-extrabold text-white">
-              {metrics.coreTemp}°C · {metrics.radiation} <span className="text-xs font-normal text-blue-200/50">mSv</span>
-            </span>
-            <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300">WATCH</span>
-          </div>
+          <p className="text-[11px] text-blue-200/55 mt-1.5">Plain-language guide: Space radiation is invisible; cumulative mSv alerts crew when to shelter behind water walls.</p>
         </div>
       </div>
     </div>
+  );
+}
+
+function getSelfCareAdvice(checkIn: SelfCheckIn): string[] {
+  const tips: string[] = [];
+  if (checkIn.sleepHours < 6) tips.push("Sleep below 6.0 hrs degrades reaction speed; schedule a 90-min recovery nap.");
+  if (checkIn.bloodGlucose < 70) tips.push("Low blood sugar (< 70 mg/dL): take 15g carbohydrate gel and recheck in 15 min.");
+  if (checkIn.bloodGlucose > 180) tips.push("High blood sugar (> 180 mg/dL): hydrate with 500 mL water and notify Flight Surgeon.");
+  if (checkIn.moodScore <= 2) tips.push("Isolation fatigue noted: initiate private family Earth-link comms or guided breathing.");
+  return tips;
+}
+
+function getHazardPillClass(level: "NOMINAL" | "WATCH" | "ELEVATED") {
+  if (level === "ELEVATED") return "bg-red-500/25 text-red-200 border-red-400/50";
+  if (level === "WATCH") return "bg-amber-500/25 text-amber-200 border-amber-400/50";
+  return "bg-emerald-500/20 text-emerald-300 border-emerald-400/30";
+}
+
+function NasaHazardsAndSelfCheckSection({
+  selectedMember,
+  memberCritical,
+  checkIn,
+  onSaveCheckIn,
+}: Readonly<{
+  selectedMember: LiveCrewMember;
+  memberCritical: boolean;
+  checkIn: SelfCheckIn;
+  onSaveCheckIn: (next: SelfCheckIn) => void;
+}>) {
+  const [sleepInput, setSleepInput] = useState(String(checkIn.sleepHours));
+  const [glucoseInput, setGlucoseInput] = useState(String(checkIn.bloodGlucose));
+  const [moodInput, setMoodInput] = useState(checkIn.moodScore);
+  const [notesInput, setNotesInput] = useState(checkIn.notes);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setSleepInput(String(checkIn.sleepHours));
+    setGlucoseInput(String(checkIn.bloodGlucose));
+    setMoodInput(checkIn.moodScore);
+    setNotesInput(checkIn.notes);
+  }, [checkIn]);
+
+  const handleSave = (e: SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    onSaveCheckIn({
+      sleepHours: Math.max(0, Math.min(16, Number.parseFloat(sleepInput) || 7)),
+      bloodGlucose: Math.max(40, Math.min(400, Number.parseInt(glucoseInput, 10) || 95)),
+      moodScore: moodInput,
+      notes: notesInput.trim() || "No symptoms reported.",
+      updatedAt: `${new Date().toISOString().slice(11, 16)} Z`,
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const radLevel = selectedMember.location === "EVA Spacewalk" || memberCritical ? "ELEVATED" : "WATCH";
+  const isoLevel = checkIn.sleepHours < 6 || checkIn.moodScore <= 2 ? "ELEVATED" : "NOMINAL";
+  const gravEnvLevel = memberCritical ? "ELEVATED" : "NOMINAL";
+
+  const hazards: Array<{ title: string; level: "NOMINAL" | "WATCH" | "ELEVATED"; note: string }> = [
+    { title: "1. SPACE RADIATION", level: radLevel, note: selectedMember.location === "EVA Spacewalk" ? "Unshielded EVA exposure; track SPE flux." : "Hull dosimetry active; ALARA shelter ready." },
+    { title: "2. ISOLATION & CONFINEMENT", level: isoLevel, note: `Sleep ${checkIn.sleepHours}h · Mood ${checkIn.moodScore}/5 behavioral log.` },
+    { title: "3. DISTANCE FROM EARTH", level: "NOMINAL", note: "Onboard AI Flight Surgeon & offline triage ready." },
+    { title: "4. GRAVITY FIELDS", level: gravEnvLevel, note: "Monitors cephalad fluid shifts & cardiac load." },
+    { title: "5. HOSTILE / CLOSED ENV", level: gravEnvLevel, note: "Tracks xEMU pressure, pCO₂, and core temp." },
+  ];
+
+  const advice = getSelfCareAdvice(checkIn);
+
+  return (
+    <>
+      <div className="rounded-3xl bg-[#141b2d]/85 border border-white/10 p-6 shadow-xl">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+          <h2 className="text-xs font-bold tracking-widest text-cyan-300 uppercase">NASA FIVE HAZARDS OF HUMAN SPACEFLIGHT · LIVE RISK EVALUATION</h2>
+          <span className="text-[10px] font-mono text-blue-200/60">NASA HRP ALIGNED</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {hazards.map((h) => (
+            <div key={h.title} className="rounded-2xl bg-slate-900/60 border border-white/5 p-3.5 flex flex-col justify-between gap-2">
+              <div>
+                <span className="text-[10px] font-extrabold text-white block mb-1.5">{h.title}</span>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${getHazardPillClass(h.level)}`}>{h.level}</span>
+              </div>
+              <p className="text-[11px] text-blue-200/60 leading-relaxed">{h.note}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-3xl bg-[#141b2d]/85 border border-white/10 p-6 shadow-xl">
+        <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+          <div>
+            <h2 className="text-xs font-bold tracking-widest text-blue-200/70 uppercase">ASTRONAUT DAILY SELF-ASSESSMENT (SLEEP, BLOOD SUGAR &amp; MOOD)</h2>
+            <p className="text-[11px] text-blue-200/50">Manual crew self-evaluation input for {selectedMember.name}</p>
+          </div>
+          <span className="text-[10px] font-mono text-blue-300/60">LOGGED: {checkIn.updatedAt}</span>
+        </div>
+
+        <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div className="md:col-span-2">
+            <label htmlFor="crew-sleep-hrs" className="block text-[10px] font-bold text-blue-200/70 uppercase mb-1">Daily Sleep (hrs)</label>
+            <input id="crew-sleep-hrs" type="number" step="0.5" min="0" max="16" value={sleepInput} onChange={(e) => setSleepInput(e.target.value)} className="w-full rounded-xl bg-slate-900/80 border border-white/10 px-3 py-2 text-sm text-white focus:border-cyan-400 focus:outline-none" />
+          </div>
+          <div className="md:col-span-2">
+            <label htmlFor="crew-blood-sugar" className="block text-[10px] font-bold text-blue-200/70 uppercase mb-1">Blood Sugar (mg/dL)</label>
+            <input id="crew-blood-sugar" type="number" min="40" max="400" value={glucoseInput} onChange={(e) => setGlucoseInput(e.target.value)} className="w-full rounded-xl bg-slate-900/80 border border-white/10 px-3 py-2 text-sm text-white focus:border-cyan-400 focus:outline-none" />
+          </div>
+          <div className="md:col-span-3">
+            <label htmlFor="crew-mood-select" className="block text-[10px] font-bold text-blue-200/70 uppercase mb-1">Mood / Behavioral Health</label>
+            <select id="crew-mood-select" value={moodInput} onChange={(e) => setMoodInput(Number(e.target.value))} className="w-full rounded-xl bg-slate-900/80 border border-white/10 px-3 py-2 text-xs text-white focus:border-cyan-400 focus:outline-none">
+              {[5, 4, 3, 2, 1].map((s) => (
+                <option key={s} value={s}>{MOOD_OPTIONS[s]}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <label htmlFor="crew-symptom-note" className="block text-[10px] font-bold text-blue-200/70 uppercase mb-1">Self-Check Symptom Note</label>
+            <input id="crew-symptom-note" type="text" value={notesInput} onChange={(e) => setNotesInput(e.target.value)} className="w-full rounded-xl bg-slate-900/80 border border-white/10 px-3 py-2 text-xs text-white focus:border-cyan-400 focus:outline-none" />
+          </div>
+          <div className="md:col-span-2">
+            <button type="submit" className="w-full py-2 px-4 rounded-xl bg-cyan-500/25 hover:bg-cyan-500/40 border border-cyan-400/50 text-cyan-200 text-xs font-bold tracking-wider transition-all">
+              {saved ? "SAVED ✓" : "LOG CHECK-IN"}
+            </button>
+          </div>
+        </form>
+
+        {advice.length > 0 && (
+          <div className="mt-4 rounded-2xl bg-amber-950/35 border border-amber-500/40 p-3.5 space-y-1">
+            <span className="text-[10px] font-bold tracking-widest text-amber-300 uppercase block">PREVENTIVE SELF-CARE GUIDANCE</span>
+            {advice.map((tip) => (
+              <p key={tip} className="text-xs text-amber-100">• {tip}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -160,6 +337,7 @@ export function CrewBiometricProfile() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [sensorLayer, setSensorLayer] = useState<SensorLayer>("BIOMEDICAL");
   const [selectedNodeId, setSelectedNodeId] = useState<string>("bio-thoracic");
+  const [checkIns, setCheckIns] = useState<Record<string, SelfCheckIn>>({});
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -185,6 +363,7 @@ export function CrewBiometricProfile() {
     );
   }
 
+  const currentCheckIn = checkIns[selectedMember.id] ?? DEFAULT_CHECKIN;
   const metrics = getProfileMetrics(selectedMember, memberCritical, (telemetry as Record<string, unknown>)?.radiation_msv as number | null ?? null);
 
   return (
@@ -246,12 +425,12 @@ export function CrewBiometricProfile() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center my-2">
             <div className="relative flex items-center justify-center bg-slate-950/60 rounded-2xl border border-white/5 py-4">
-              <HolographicMapVisuals 
-                sensorLayer={sensorLayer} 
-                activeNodes={activeNodes} 
-                activeNode={activeNode} 
-                memberCritical={memberCritical} 
-                setSelectedNodeId={setSelectedNodeId} 
+              <HolographicMapVisuals
+                sensorLayer={sensorLayer}
+                activeNodes={activeNodes}
+                activeNode={activeNode}
+                memberCritical={memberCritical}
+                setSelectedNodeId={setSelectedNodeId}
               />
             </div>
             <div className="flex flex-col gap-2.5">
@@ -270,19 +449,19 @@ export function CrewBiometricProfile() {
                   </button>
                 );
               })}
-              
+
               {/* EXPANDED MEDICAL STABILIZATION TOOLKIT */}
               {memberCritical && (
                 <div className="mt-4 bg-emerald-950/30 border border-emerald-500/20 rounded-2xl p-4">
                   <span className="text-[10px] font-bold tracking-widest text-emerald-400/80 uppercase block mb-3">DEPLOY STABILIZATION MEASURES</span>
                   <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => treatCrewMember(selectedMember.id)} className="col-span-2 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
+                    <button type="button" onClick={() => treatCrewMember(selectedMember.id)} className="col-span-2 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
                       MAXIMIZE LCVG COOLANT LOOP
                     </button>
-                    <button onClick={() => treatCrewMember(selectedMember.id)} className="py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
+                    <button type="button" onClick={() => treatCrewMember(selectedMember.id)} className="py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
                       INITIATE 100% O₂ FLUSH
                     </button>
-                    <button onClick={() => treatCrewMember(selectedMember.id)} className="py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
+                    <button type="button" onClick={() => treatCrewMember(selectedMember.id)} className="py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 border border-emerald-500/50 text-emerald-300 text-[10px] font-bold tracking-wider transition-all">
                       ADMINISTER SEDATIVE
                     </button>
                   </div>
@@ -301,9 +480,16 @@ export function CrewBiometricProfile() {
         </div>
 
         <div className="lg:col-span-6 flex flex-col gap-4">
-          <TelemetryMatrix selectedMember={selectedMember} metrics={metrics} memberCritical={memberCritical} />
+          <TelemetryMatrix selectedMember={selectedMember} metrics={metrics} memberCritical={memberCritical} checkIn={currentCheckIn} />
         </div>
       </div>
+
+      <NasaHazardsAndSelfCheckSection
+        selectedMember={selectedMember}
+        memberCritical={memberCritical}
+        checkIn={currentCheckIn}
+        onSaveCheckIn={(next) => setCheckIns((prev) => ({ ...prev, [selectedMember.id]: next }))}
+      />
     </div>
   );
 }
